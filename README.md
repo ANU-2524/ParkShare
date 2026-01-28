@@ -1,3 +1,5 @@
+"This project was developed during the Winter Internship '25 at console.success."
+
 # ParkShare - Community Parking & Traffic Routing System
 
 ## 🚗 Project Overview
