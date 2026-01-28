@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h2>Host Dashboard</h2>
+        <a href="{{ url_for('create_listing') }}" class="btn-primary">Add New Listing</a>
+    </div>
+
+    <div class="stats-card">
+        <h3>Total Earnings</h3>
+        <p class="earnings-amount">${{ "%.2f"|format(earnings) }}</p>
+    </div>
+
+    <h3>My Listings</h3>
+    {% if listings %}
+    <div class="listings-grid">
+        {% for listing in listings %}
+        <div class="listing-card">
+            <h4>{{ listing.title }}</h4>
+            <p class="location">📍 {{ listing.location }}</p>
+            <p class="price">${{ listing.hourly_rate }}/hr</p>
+            <form action="{{ url_for('delete_listing', id=listing.id) }}" method="POST"
+                onsubmit="return confirm('Are you sure?');">
+                <button type="submit" class="btn-danger">Delete</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p>No listings yet. Create one to start earning!</p>
+    {% endif %}
+</div>
+{% endblock %}

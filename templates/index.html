@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+    #map {
+        height: 400px;
+        width: 100%;
+        border-radius: 1rem;
+        margin-top: 2rem;
+        border: 1px solid var(--glass-border);
+    }
+</style>
+
+<div class="hero">
+    <h1>Find Parking in Seconds</h1>
+    <p>Connect with homeowners for affordable, secure parking.</p>
+
+    <form action="/search" method="GET" class="search-container">
+        <div class="search-input-group">
+            <input type="text" name="query" placeholder="Where are you going? (Try 'Market Square')"
+                value="{{ query }}">
+            <button type="submit" class="btn-primary">Search</button>
+        </div>
+
+        <div class="filters">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <input type="number" name="min_price" placeholder="Min $" style="width: 80px;"
+                    value="{{ request.args.get('min_price', '') }}">
+                <span>to</span>
+                <input type="number" name="max_price" placeholder="Max $" style="width: 80px;"
+                    value="{{ request.args.get('max_price', '') }}">
+            </div>
+
+            {% for amenity in amenities %}
+            <label class="filter-chip">
+                <input type="checkbox" name="amenities" value="{{ amenity.id }}" style="display: none;" {% if
+                    amenity.id|string in request.args.getlist('amenities') %}checked{% endif %}>
+                <span>{{ amenity.name }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </form>
+</div>
+
+{% if query %}
+<div class="results-container" style="max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+    {% if high_traffic %}
+    <div class="alert alert-danger">
+        <strong>High Traffic Alert!</strong> Public parking at {{ query }} is full.
+        Showing available private spots nearby to help you avoid congestion.
+    </div>
+    {% endif %}
+
+    <h3 style="margin-bottom: 1rem;">Available Spots</h3>
+
+    <div id="map"></div>
+
+    {% if listings %}
+    <div class="listings-grid">
+        {% for listing in listings %}
+        <div class="listing-card">
+            {% if current_user.is_authenticated %}
+            <form action="{{ url_for('toggle_favorite', listing_id=listing.id) }}" method="POST"
+                style="display: inline;">
+                <button type="submit" class="favorite-btn {{ 'active' if listing.id in user_favorites else '' }}">
+                    {{ '♥' if listing.id in user_favorites else '♡' }}
+                </button>
+            </form>
+            {% endif %}
+
+            <h4>{{ listing.title }}</h4>
+            <p class="location">📍 {{ listing.location }}</p>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <p class="price" style="margin: 0;">${{ listing.hourly_rate }}/hr</p>
+                {% set avg_rating = 0 %}
+                {% if listing.reviews %}
+                {% set avg_rating = listing.reviews|map(attribute='rating')|sum / listing.reviews|length %}
+                {% endif %}
+                <span style="color: #fbbf24; font-weight: bold;">
+                    ★ {{ "%.1f"|format(avg_rating) if listing.reviews else 'New' }}
+                    <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">({{
+                        listing.reviews|length }})</span>
+                </span>
+            </div>
+
+            <div class="amenities-tags">
+                {% for amenity in listing.amenities %}
+                <span class="amenity-tag">{{ amenity.name }}</span>
+                {% endfor %}
+            </div>
+
+            <p class="description" style="margin-bottom: 1rem; color: #cbd5e1;">{{ listing.description }}</p>
+            <a href="{{ url_for('book', listing_id=listing.id) }}" class="btn-secondary"
+                style="display: block; text-align: center;">Book Now</a>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        var map = L.map('map').setView([51.505, -0.09], 13); // Default view
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        var listings = [
+            {% for listing in listings %}
+        {
+            "title": "{{ listing.title }}",
+                "lat": { { listing.latitude if listing.latitude else 0 } },
+            "lng": { { listing.longitude if listing.longitude else 0 } },
+            "price": "{{ listing.hourly_rate }}"
+        },
+        {% endfor %}
+                ];
+
+        var bounds = [];
+        listings.forEach(function (listing) {
+            if (listing.lat !== 0 && listing.lng !== 0) {
+                var marker = L.marker([listing.lat, listing.lng]).addTo(map)
+                    .bindPopup("<b>" + listing.title + "</b><br>$" + listing.price + "/hr");
+                bounds.push([listing.lat, listing.lng]);
+            }
+        });
+
+        if (bounds.length > 0) {
+            map.fitBounds(bounds);
+        }
+    </script>
+    {% else %}
+    <p style="text-align: center; margin-top: 2rem;">No spots found matching your search.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

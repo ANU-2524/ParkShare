@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Secure Payment{% endblock %}
+
+{% block content %}
+<div class="auth-container" style="max-width: 500px;">
+    <h2>Secure Payment</h2>
+    <div style="background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 0.5rem; margin-bottom: 2rem;">
+        <p><strong>Booking:</strong> {{ booking.listing.title }}</p>
+        <p><strong>Total:</strong> <span style="font-size: 1.5rem; color: var(--primary); font-weight: bold;">${{
+                "%.2f"|format(booking.total_price) }}</span></p>
+    </div>
+
+    <form method="POST">
+        <div class="form-group">
+            <label>Card Number</label>
+            <input type="text" placeholder="0000 0000 0000 0000" maxlength="19" required>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <div class="form-group" style="flex: 1;">
+                <label>Expiry</label>
+                <input type="text" placeholder="MM/YY" maxlength="5" required>
+            </div>
+            <div class="form-group" style="flex: 1;">
+                <label>CVV</label>
+                <input type="password" placeholder="123" maxlength="3" required>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Cardholder Name</label>
+            <input type="text" placeholder="John Doe" required>
+        </div>
+
+        <button type="submit" class="btn-primary" style="width: 100%;">Pay & Confirm Booking</button>
+    </form>
+
+    <p style="text-align: center; margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted);">
+        <i class="fas fa-lock"></i> This is a secure 256-bit SSL encrypted payment.
+    </p>
+</div>
+{% endblock %}
