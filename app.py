@@ -1,8 +1,9 @@
-from flask import Flask, render_template, redirect, url_for, flash, request
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import db, User, Listing, Booking, Review, Amenity
+from models import db, User, Listing, Booking, Review, Amenity, TrafficArea, AvailableSlot
 import datetime
+import math
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dev_secret_key_123' # Change for production
@@ -24,6 +25,100 @@ def init_amenities():
         if not Amenity.query.filter_by(name=name).first():
             db.session.add(Amenity(name=name))
     db.session.commit()
+
+def init_traffic_areas():
+    """Initialize common parking areas"""
+    areas = [
+        {'name': 'Market Square', 'lat': 40.7128, 'lon': -74.0060, 'capacity': 50},
+        {'name': 'Downtown Center', 'lat': 40.7255, 'lon': -73.9983, 'capacity': 75},
+        {'name': 'Airport District', 'lat': 40.7700, 'lon': -73.8740, 'capacity': 200},
+        {'name': 'Harbor Front', 'lat': 40.6892, 'lon': -74.0445, 'capacity': 100},
+        {'name': 'Tech Park', 'lat': 40.7489, 'lon': -73.9680, 'capacity': 150},
+    ]
+    
+    for area in areas:
+        if not TrafficArea.query.filter_by(name=area['name']).first():
+            new_area = TrafficArea(
+                name=area['name'],
+                latitude=area['lat'],
+                longitude=area['lon'],
+                max_capacity=area['capacity']
+            )
+            db.session.add(new_area)
+    db.session.commit()
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance between two points in km (Haversine formula)"""
+    R = 6371  # Earth radius in km
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
+
+def get_area_traffic_status(area_name):
+    """Determine traffic status based on current occupancy"""
+    area = TrafficArea.query.filter_by(name=area_name).first()
+    if not area:
+        return {'status': 'unknown', 'color': 'gray', 'percentage': 0}
+    
+    occupancy = area.get_occupancy_percentage()
+    
+    if occupancy >= 100:
+        area.congestion_level = 'blocked'
+    elif occupancy >= 80:
+        area.congestion_level = 'high'
+    elif occupancy >= 50:
+        area.congestion_level = 'medium'
+    else:
+        area.congestion_level = 'low'
+    
+    area.is_full = occupancy >= 100
+    db.session.commit()
+    
+    return {
+        'status': area.congestion_level,
+        'color': area.get_traffic_status(),
+        'percentage': occupancy,
+        'is_full': area.is_full
+    }
+
+def find_nearby_parking(search_location_lat, search_location_lon, search_area_name, radius_km=5):
+    """Find available private parking near congested areas"""
+    all_listings = Listing.query.all()
+    nearby_listings = []
+    
+    now = datetime.datetime.now()
+    
+    for listing in all_listings:
+        if listing.latitude is None or listing.longitude is None:
+            continue
+            
+        distance = calculate_distance(
+            search_location_lat, search_location_lon,
+            listing.latitude, listing.longitude
+        )
+        
+        if distance <= radius_km:
+            # Check if listing has available slots now
+            available_booking = Booking.query.filter(
+                Booking.listing_id == listing.id,
+                Booking.status == 'confirmed',
+                Booking.end_time > now
+            ).first()
+            
+            nearby_listings.append({
+                'listing': listing,
+                'distance': round(distance, 2),
+                'host': listing.host
+            })
+    
+    # Sort by distance
+    nearby_listings.sort(key=lambda x: x['distance'])
+    return nearby_listings[:10]  # Return top 10 nearest
 
 @app.route('/')
 def index():
@@ -80,10 +175,48 @@ def logout():
 def dashboard():
     if not current_user.is_host:
         return redirect(url_for('index'))
+    
     listings = Listing.query.filter_by(host_id=current_user.id).all()
-    # Calculate earnings (mocked for now or simple sum)
-    earnings = sum(booking.total_price for listing in listings for booking in listing.bookings if booking.status == 'confirmed')
-    return render_template('dashboard.html', listings=listings, earnings=earnings)
+    
+    # Calculate earnings from completed bookings
+    completed_bookings = Booking.query.filter(
+        Booking.listing_id.in_([l.id for l in listings]),
+        Booking.status == 'confirmed',
+        Booking.payment_status == 'paid'
+    ).all()
+    
+    total_earnings = sum(booking.total_price for booking in completed_bookings)
+    
+    # Calculate stats
+    total_bookings = len(completed_bookings)
+    total_hours = sum(
+        (booking.end_time - booking.start_time).total_seconds() / 3600 
+        for booking in completed_bookings
+    )
+    
+    # Get ratings
+    all_reviews = Review.query.filter(
+        Review.listing_id.in_([l.id for l in listings])
+    ).all()
+    avg_rating = sum(r.rating for r in all_reviews) / len(all_reviews) if all_reviews else 0
+    
+    earnings_breakdown = {}
+    for listing in listings:
+        listing_bookings = Booking.query.filter(
+            Booking.listing_id == listing.id,
+            Booking.status == 'confirmed'
+        ).all()
+        earnings_breakdown[listing.id] = sum(b.total_price for b in listing_bookings)
+    
+    return render_template(
+        'dashboard.html',
+        listings=listings,
+        earnings=total_earnings,
+        total_bookings=total_bookings,
+        total_hours=round(total_hours, 1),
+        avg_rating=round(avg_rating, 1),
+        earnings_breakdown=earnings_breakdown
+    )
 
 @app.route('/create_listing', methods=['GET', 'POST'])
 @login_required
@@ -140,7 +273,27 @@ def search():
     selected_amenities = request.args.getlist('amenities')
     
     high_traffic = False
+    high_traffic_status = None
+    reroute_suggestions = []
     listings = []
+    traffic_area = None
+    
+    # Check traffic status for the searched area
+    if query:
+        traffic_area = TrafficArea.query.filter_by(name=query).first()
+        if traffic_area:
+            traffic_status = get_area_traffic_status(query)
+            high_traffic = traffic_status['is_full']
+            high_traffic_status = traffic_status
+            
+            # If area is full/high traffic, suggest nearby private parking
+            if high_traffic or traffic_status['percentage'] >= 75:
+                reroute_suggestions = find_nearby_parking(
+                    traffic_area.latitude,
+                    traffic_area.longitude,
+                    query,
+                    radius_km=5
+                )
     
     # Base Query
     query_obj = Listing.query
@@ -160,28 +313,6 @@ def search():
             
     listings = query_obj.all()
     
-    # Traffic Logic
-    if listings:
-        now = datetime.datetime.now()
-        active_bookings = 0
-        for listing in listings:
-            is_booked = Booking.query.filter(
-                Booking.listing_id == listing.id,
-                Booking.status != 'cancelled',
-                Booking.start_time <= now,
-                Booking.end_time >= now
-            ).count() > 0
-            if is_booked:
-                active_bookings += 1
-        
-        if len(listings) > 0 and (active_bookings / len(listings)) > 0.5:
-            high_traffic = True
-            
-    # Fallback for demo
-    if query.lower() == 'market square' and not listings:
-         high_traffic = True
-         listings = Listing.query.all()
-
     amenities = Amenity.query.all()
     
     # Get user favorites if logged in
@@ -189,7 +320,17 @@ def search():
     if current_user.is_authenticated:
         user_favorites = [listing.id for listing in current_user.favorites]
         
-    return render_template('index.html', query=query, high_traffic=high_traffic, listings=listings, amenities=amenities, user_favorites=user_favorites)
+    return render_template(
+        'index.html',
+        query=query,
+        high_traffic=high_traffic,
+        high_traffic_status=high_traffic_status,
+        reroute_suggestions=reroute_suggestions,
+        listings=listings,
+        amenities=amenities,
+        user_favorites=user_favorites,
+        traffic_area=traffic_area
+    )
 
 @app.route('/toggle_favorite/<int:listing_id>', methods=['POST'])
 @login_required
@@ -322,10 +463,92 @@ def profile():
         return redirect(url_for('profile'))
     return render_template('profile.html')
 
+# ============== API Routes for AJAX ==============
+
+@app.route('/api/traffic_status/<area_name>')
+def api_traffic_status(area_name):
+    """API endpoint to get traffic status for an area"""
+    status = get_area_traffic_status(area_name)
+    return jsonify(status)
+
+@app.route('/api/nearby_parking')
+def api_nearby_parking():
+    """API endpoint to get nearby parking suggestions"""
+    lat = request.args.get('lat', type=float)
+    lon = request.args.get('lon', type=float)
+    area_name = request.args.get('area', '')
+    radius = request.args.get('radius', 5, type=float)
+    
+    if lat is None or lon is None:
+        return jsonify({'error': 'Missing coordinates'}), 400
+    
+    suggestions = find_nearby_parking(lat, lon, area_name, radius_km=radius)
+    
+    result = []
+    for item in suggestions:
+        result.append({
+            'id': item['listing'].id,
+            'title': item['listing'].title,
+            'location': item['listing'].location,
+            'rate': item['listing'].hourly_rate,
+            'distance': item['distance'],
+            'lat': item['listing'].latitude,
+            'lon': item['listing'].longitude,
+            'host': item['host'].username
+        })
+    
+    return jsonify(result)
+
+@app.route('/api/earnings/<int:listing_id>')
+@login_required
+def api_earnings(listing_id):
+    """API endpoint to get earnings for a specific listing"""
+    listing = Listing.query.get_or_404(listing_id)
+    if listing.host_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    bookings = Booking.query.filter(
+        Booking.listing_id == listing_id,
+        Booking.status == 'confirmed'
+    ).all()
+    
+    total = sum(b.total_price for b in bookings)
+    hours = sum((b.end_time - b.start_time).total_seconds() / 3600 for b in bookings)
+    
+    return jsonify({
+        'listing_id': listing_id,
+        'total_earnings': round(total, 2),
+        'total_bookings': len(bookings),
+        'total_hours': round(hours, 1),
+        'average_rate': listing.hourly_rate
+    })
+
+@app.route('/api/all_traffic_areas')
+def api_all_traffic_areas():
+    """API endpoint to get all traffic areas and their status"""
+    areas = TrafficArea.query.all()
+    result = []
+    
+    for area in areas:
+        status = get_area_traffic_status(area.name)
+        result.append({
+            'id': area.id,
+            'name': area.name,
+            'lat': area.latitude,
+            'lon': area.longitude,
+            'occupancy': round(status['percentage'], 1),
+            'status': status['status'],
+            'color': status['color'],
+            'is_full': status['is_full']
+        })
+    
+    return jsonify(result)
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         init_amenities() # Initialize default amenities
+        init_traffic_areas() # Initialize traffic areas
     print("Starting ParkShare application...")
     app.run(debug=True)
 

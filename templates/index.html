@@ -13,11 +13,80 @@
         margin-top: 2rem;
         border: 1px solid var(--glass-border);
     }
+    .traffic-status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        font-weight: 500;
+    }
+    .traffic-status.red {
+        background-color: rgba(239, 68, 68, 0.1);
+        border: 1px solid #ef4444;
+        color: #dc2626;
+    }
+    .traffic-status.orange {
+        background-color: rgba(249, 115, 22, 0.1);
+        border: 1px solid #f97316;
+        color: #ea580c;
+    }
+    .traffic-status.yellow {
+        background-color: rgba(234, 179, 8, 0.1);
+        border: 1px solid #eab308;
+        color: #ca8a04;
+    }
+    .traffic-status.green {
+        background-color: rgba(34, 197, 94, 0.1);
+        border: 1px solid #22c55e;
+        color: #16a34a;
+    }
+    .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .reroute-suggestions {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 1rem;
+        color: white;
+        margin-bottom: 2rem;
+    }
+    .reroute-suggestions h3 {
+        margin-top: 0;
+        color: white;
+    }
+    .reroute-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1rem;
+    }
+    .reroute-card {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        color: #1f2937;
+    }
+    .reroute-card h4 {
+        margin: 0 0 0.5rem 0;
+        color: #667eea;
+    }
+    .distance-badge {
+        background: #667eea;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.875rem;
+        display: inline-block;
+    }
 </style>
 
 <div class="hero">
     <h1>Find Parking in Seconds</h1>
-    <p>Connect with homeowners for affordable, secure parking.</p>
+    <p>Connect with homeowners for affordable, secure parking. Smart routing to avoid congestion.</p>
 
     <form action="/search" method="GET" class="search-container">
         <div class="search-input-group">
@@ -48,18 +117,41 @@
 
 {% if query %}
 <div class="results-container" style="max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
-    {% if high_traffic %}
-    <div class="alert alert-danger">
-        <strong>High Traffic Alert!</strong> Public parking at {{ query }} is full.
-        Showing available private spots nearby to help you avoid congestion.
+    
+    {% if high_traffic_status %}
+    <div class="traffic-status {{ high_traffic_status.color }}">
+        <span class="status-dot" style="background-color: currentColor;"></span>
+        <strong>{{ query }} - {{ high_traffic_status.status|upper }}</strong>
+        <span style="margin-left: auto; font-size: 0.9rem;">{{ "%.1f"|format(high_traffic_status.percentage) }}% Occupied</span>
     </div>
     {% endif %}
 
-    <h3 style="margin-bottom: 1rem;">Available Spots</h3>
+    {% if high_traffic and reroute_suggestions %}
+    <div class="reroute-suggestions">
+        <h3>🚗 Smart Reroute: Available Private Parking Nearby</h3>
+        <p style="margin-bottom: 1rem;">Public parking is full or congested. We found these private spots nearby to save you time!</p>
+        <div class="reroute-grid">
+            {% for suggestion in reroute_suggestions[:6] %}
+            <div class="reroute-card">
+                <h4>{{ suggestion.listing.title }}</h4>
+                <p style="margin: 0.25rem 0; font-size: 0.9rem;">📍 {{ suggestion.listing.location }}</p>
+                <p style="margin: 0.25rem 0; font-size: 0.9rem; font-weight: 500; color: #667eea;">${{ suggestion.listing.hourly_rate }}/hr</p>
+                <p style="margin: 0.25rem 0; font-size: 0.85rem;">
+                    <span class="distance-badge">{{ suggestion.distance }} km away</span>
+                </p>
+                <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: #6b7280;">Host: {{ suggestion.host.username }}</p>
+                <a href="{{ url_for('book', listing_id=suggestion.listing.id) }}" class="btn-primary" style="display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; text-decoration: none; background-color: #667eea; color: white; border-radius: 0.25rem; font-size: 0.9rem;">Book</a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if listings %}
+    <h3 style="margin-bottom: 1rem;">{{ "All Available Spots" if not high_traffic else "Additional Available Spots" }}</h3>
 
     <div id="map"></div>
 
-    {% if listings %}
     <div class="listings-grid">
         {% for listing in listings %}
         <div class="listing-card">
@@ -102,7 +194,7 @@
     </div>
 
     <script>
-        var map = L.map('map').setView([51.505, -0.09], 13); // Default view
+        var map = L.map('map').setView([40.7128, -74.0060], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
@@ -112,8 +204,8 @@
             {% for listing in listings %}
         {
             "title": "{{ listing.title }}",
-                "lat": { { listing.latitude if listing.latitude else 0 } },
-            "lng": { { listing.longitude if listing.longitude else 0 } },
+                "lat": {{ listing.latitude if listing.latitude else 40.7128 }},
+            "lng": {{ listing.longitude if listing.longitude else -74.0060 }},
             "price": "{{ listing.hourly_rate }}"
         },
         {% endfor %}

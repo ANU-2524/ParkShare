@@ -1,36 +1,188 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Host Dashboard{% endblock %}
 
 {% block content %}
+<style>
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 1rem;
+        color: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card.secondary {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    
+    .stat-card.success {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }
+    
+    .stat-card.warning {
+        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    }
+    
+    .stat-label {
+        font-size: 0.9rem;
+        opacity: 0.9;
+        margin-bottom: 0.5rem;
+    }
+    
+    .stat-value {
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 0;
+    }
+    
+    .stat-subtext {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        margin-top: 0.5rem;
+    }
+    
+    .listing-stats {
+        background: rgba(102, 126, 234, 0.05);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid #667eea;
+    }
+    
+    .listing-stats h5 {
+        margin: 0 0 0.5rem 0;
+        color: #667eea;
+    }
+    
+    .listing-stats-content {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        font-size: 0.9rem;
+    }
+    
+    .listing-stats-item {
+        display: flex;
+        justify-content: space-between;
+    }
+</style>
+
 <div class="dashboard-container">
     <div class="dashboard-header">
-        <h2>Host Dashboard</h2>
-        <a href="{{ url_for('create_listing') }}" class="btn-primary">Add New Listing</a>
+        <div>
+            <h2>🏠 Host Dashboard</h2>
+            <p style="color: #64748b; margin: 0;">Welcome back, {{ current_user.username }}! Manage your parking spaces and track earnings.</p>
+        </div>
+        <a href="{{ url_for('create_listing') }}" class="btn-primary" style="white-space: nowrap;">+ Add New Listing</a>
     </div>
 
-    <div class="stats-card">
-        <h3>Total Earnings</h3>
-        <p class="earnings-amount">${{ "%.2f"|format(earnings) }}</p>
+    <!-- Statistics Grid -->
+    <div class="stats-grid">
+        <div class="stat-card success">
+            <div class="stat-label">💰 Total Earnings</div>
+            <p class="stat-value">${{ "%.2f"|format(earnings) }}</p>
+            <div class="stat-subtext">From all confirmed bookings</div>
+        </div>
+        
+        <div class="stat-card secondary">
+            <div class="stat-label">📅 Total Bookings</div>
+            <p class="stat-value">{{ total_bookings }}</p>
+            <div class="stat-subtext">Confirmed reservations</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-label">⏱️ Hours Booked</div>
+            <p class="stat-value">{{ total_hours }}</p>
+            <div class="stat-subtext">Total parking hours</div>
+        </div>
+        
+        <div class="stat-card warning">
+            <div class="stat-label">⭐ Average Rating</div>
+            <p class="stat-value">{{ avg_rating }}</p>
+            <div class="stat-subtext">Based on guest reviews</div>
+        </div>
     </div>
 
-    <h3>My Listings</h3>
+    <!-- Listings Section -->
+    <h3 style="margin-bottom: 1rem; margin-top: 2rem;">📍 Your Listings</h3>
+    
     {% if listings %}
-    <div class="listings-grid">
         {% for listing in listings %}
-        <div class="listing-card">
-            <h4>{{ listing.title }}</h4>
-            <p class="location">📍 {{ listing.location }}</p>
-            <p class="price">${{ listing.hourly_rate }}/hr</p>
-            <form action="{{ url_for('delete_listing', id=listing.id) }}" method="POST"
-                onsubmit="return confirm('Are you sure?');">
-                <button type="submit" class="btn-danger">Delete</button>
-            </form>
+        <div class="listing-card" style="margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div style="flex: 1;">
+                    <h4 style="margin: 0 0 0.5rem 0;">{{ listing.title }}</h4>
+                    <p class="location" style="margin: 0.25rem 0;">📍 {{ listing.location }}</p>
+                    <p style="margin: 0.25rem 0; color: #667eea; font-weight: 500;">${{ listing.hourly_rate }}/hour</p>
+                    
+                    {% if listing.description %}
+                    <p style="margin: 0.5rem 0; color: #64748b; font-size: 0.9rem;">{{ listing.description }}</p>
+                    {% endif %}
+                    
+                    {% if listing.amenities %}
+                    <div class="amenities-tags" style="margin: 0.5rem 0;">
+                        {% for amenity in listing.amenities %}
+                        <span class="amenity-tag">{{ amenity.name }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Listing Specific Stats -->
+                    {% if earnings_breakdown[listing.id] %}
+                    <div class="listing-stats">
+                        <h5>💵 Earnings from this listing</h5>
+                        <div class="listing-stats-content">
+                            <div class="listing-stats-item">
+                                <span>Total:</span>
+                                <strong>${{ "%.2f"|format(earnings_breakdown[listing.id]) }}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <form action="{{ url_for('delete_listing', id=listing.id) }}" method="POST"
+                    onsubmit="return confirm('Are you sure? This will delete the listing permanently.');"
+                    style="margin-left: 1rem;">
+                    <button type="submit" class="btn-danger" style="white-space: nowrap;">Delete</button>
+                </form>
+            </div>
         </div>
         {% endfor %}
-    </div>
     {% else %}
-    <p>No listings yet. Create one to start earning!</p>
+        <div style="background: rgba(102, 126, 234, 0.05); padding: 2rem; border-radius: 1rem; text-align: center;">
+            <p style="margin: 0 0 1rem 0; color: #64748b;">No listings yet. Create your first listing to start earning!</p>
+            <a href="{{ url_for('create_listing') }}" class="btn-primary">Create Your First Listing</a>
+        </div>
     {% endif %}
+
+    <!-- Quick Tips -->
+    <div style="background: linear-gradient(135deg, rgba(79, 172, 254, 0.1) 0%, rgba(0, 242, 254, 0.1) 100%); padding: 1.5rem; border-radius: 1rem; margin-top: 2rem;">
+        <h4 style="margin-top: 0; color: #0284c7;">💡 Tips to Increase Earnings</h4>
+        <ul style="margin: 0; padding-left: 1.5rem; color: #64748b; line-height: 1.8;">
+            <li>Add detailed descriptions and photos to attract more bookings</li>
+            <li>Include helpful amenities like EV charging or CCTV for higher rates</li>
+            <li>Respond quickly to booking requests and reviews</li>
+            <li>Keep your calendar updated with available time slots</li>
+            <li>Offer competitive pricing in your neighborhood</li>
+        </ul>
+    </div>
 </div>
 {% endblock %}
